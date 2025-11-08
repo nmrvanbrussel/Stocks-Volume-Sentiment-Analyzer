@@ -1,0 +1,2 @@
+symbol,date_utc,messages,tmin_utc,tmax_utc,window_minutes,msgs_per_hour,avg_seconds_between
+ACHR,2025-11-05,73,2025-11-05T02:57:56Z,2025-11-05T18:28:07Z,930.18,4.709,775.15
