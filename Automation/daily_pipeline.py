@@ -6,9 +6,9 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-SYMBOLS = [] 
+SYMBOLS = ["DGXX", "AAPL", "IREN"] 
 
-PROJECT_ROOT = Path(__file__).parent.resolve()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRAPE = PROJECT_ROOT / "Scraping" / "scraping_stockwits.py"
 SENTI  = PROJECT_ROOT / "Sentiment_Analysis" / "stockwits_sentiment_analyzer.py"
 VOLUME = PROJECT_ROOT / "Volume" / "Volume_Sentiment_Analyzer.py"
@@ -48,12 +48,13 @@ def run_pipeline():
         print("-" * 80)
 
         try:
-            # Set symbol in scraper and run it
+            # 1) Set symbol in scraper and run it
             replace_in_file(
                 SCRAPE,
-                r'^\s*symbol\s*=\s*r?["\'][^"\']*["\']',
-                f'symbol = "{sym}"'
+                r'^(\s*)symbol\s*=\s*r?["\'][^"\']*["\']',
+                rf'\1symbol = "{sym}"'
             )
+            
             run_script(SCRAPE)
             time.sleep(2)  # allow filesystem to flush
 
@@ -64,19 +65,23 @@ def run_pipeline():
             print(f"CSV: {csv_path}")
 
             # Point sentiment script to CSV and run
+            escaped_csv = csv_path.replace("\\", "\\\\")
             replace_in_file(
                 SENTI,
-                r'^\s*CSV_PATH\s*=\s*r?["\'][^"\']*["\']',
-                f'CSV_PATH = r"{csv_path}"'
+                r'^(\s*)CSV_PATH\s*=\s*r?["\'][^"\']*["\']',
+                rf'\1CSV_PATH = r"{escaped_csv}"'
             )
+
             run_script(SENTI)
 
             # 4) Point volume script to CSV and run
+            escaped_csv = csv_path.replace("\\", "\\\\")
             replace_in_file(
                 VOLUME,
-                r'^\s*CSV_PATH\s*=\s*r?["\'][^"\']*["\']',
-                f'CSV_PATH = r"{csv_path}"'
+                r'^(\s*)CSV_PATH\s*=\s*r?["\'][^"\']*["\']',
+                rf'\1CSV_PATH = r"{escaped_csv}"'
             )
+
             run_script(VOLUME)
 
             ok.append(sym)
