@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+IREN,77.0,0.1429,0.1558,0.7013,0.1941,0.1852,0.6207,0.0089,0.6824,0.7892

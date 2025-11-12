@@ -29,8 +29,7 @@ def script_scrape_stockwits():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
-
-        symbol = "ACHR"
+        symbol = "NVDA"
         url = f"https://stocktwits.com/symbol/{symbol}"
         print ("Navigating to Symbol Stock Page...")
         page.goto(url)

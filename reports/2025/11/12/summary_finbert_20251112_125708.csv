@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+DGXX,72.0,0.1389,0.1528,0.7083,0.1831,0.1769,0.64,0.0063,0.4508,0.8105

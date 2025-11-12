@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+AAPL,77.0,0.1299,0.0909,0.7792,0.1566,0.1177,0.7257,0.0389,2.9947,0.8061

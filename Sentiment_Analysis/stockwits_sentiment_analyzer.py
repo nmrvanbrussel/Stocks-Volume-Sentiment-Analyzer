@@ -7,7 +7,7 @@ from datetime import datetime
 
 
 # 1) Input CSV from your scraper
-CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\stocktwits\2025\11\05\stocktwits_messages_ACHR_20251105_193022.csv"  # change as needed
+CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\stocktwits\2025\11\12\stocktwits_messages_NVDA_20251112_162003.csv"  # change as needed
 TEXT_COL = "message"
 SYMBOL_COL = "symbol"
 
