@@ -6,7 +6,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-SYMBOLS = ["DGXX", "AAPL", "IREN"] 
+SYMBOLS = ["NVDA"] 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRAPE = PROJECT_ROOT / "Scraping" / "scraping_stockwits.py"
@@ -54,7 +54,7 @@ def run_pipeline():
                 r'^(\s*)symbol\s*=\s*r?["\'][^"\']*["\']',
                 rf'\1symbol = "{sym}"'
             )
-            
+
             run_script(SCRAPE)
             time.sleep(2)  # allow filesystem to flush
 
