@@ -6,7 +6,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-SYMBOLS = ["NVDA"] 
+SYMBOLS = ["DGXX"] 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRAPE = PROJECT_ROOT / "Scraping" / "scraping_stockwits.py"
