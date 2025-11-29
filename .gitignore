@@ -27,13 +27,18 @@ Thumbs.db
 
 # Environment variables and secrets
 .env
+.env.local
+.env.*.local
 *.key
 *.pem
 secrets.json
+config.json
+reddit_config.json
+*_config.json
+*_credentials.json
 
 # Jupyter Notebooks
 .ipynb_checkpoints
 
 # Logs
 *.log
-

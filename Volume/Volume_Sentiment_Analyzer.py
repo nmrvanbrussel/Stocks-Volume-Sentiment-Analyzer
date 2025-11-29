@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 
 #Change CSV_PATH ofc
-CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\stocktwits\2025\11\12\stocktwits_messages_DGXX_20251112_173249.csv"
+CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\GOOG\2025\11\29\reddit_posts_GOOG_20251129_212349.csv"
 
 df = pd.read_csv(CSV_PATH)
 
@@ -14,26 +14,48 @@ df = df.dropna(subset=['ts'])
 # Daily table per symbol
 def daily_volume_table(df, symbol):
     sdf = df[df['symbol'] == symbol].copy()
+    # Ensure ts is datetime just in case
+    sdf['ts'] = pd.to_datetime(sdf['ts'])
     sdf['date_utc'] = sdf['ts'].dt.date
+    
     def _summ(g):
-        n = len(g); tmin = g['ts'].min(); tmax = g['ts'].max()
-        win_min = max((tmax - tmin).total_seconds()/60.0, 1e-9)
+        n = len(g)
+        tmin = g['ts'].min()
+        tmax = g['ts'].max()
+        
+        #(For display)
+        real_duration_min = (tmax - tmin).total_seconds() / 60.0
+        
+        # Math Duration (For Rate Calculation)
+        math_duration_min = max(real_duration_min, 1.0)
+        
         return pd.Series({
             'messages': n,
             'tmin_utc': tmin,
             'tmax_utc': tmax,
-            'window_minutes': round(win_min, 2),
-            'msgs_per_hour': round((n/win_min)*60.0, 3),
+            'window_minutes': round(real_duration_min, 2),     # Show the REAL short time
+            'msgs_per_hour': round((n / math_duration_min) * 60.0, 3), # Use the SAFE time
             'avg_seconds_between': round((tmax - tmin).total_seconds()/max(n-1,1), 2),
         })
-    return (sdf.groupby('date_utc').apply(_summ).reset_index()
+
+    return (sdf.groupby('date_utc').apply(_summ, include_groups=False).reset_index()
             .assign(symbol=symbol)
             .loc[:, ['symbol','date_utc','messages','tmin_utc','tmax_utc',
                      'window_minutes','msgs_per_hour','avg_seconds_between']]
             .sort_values(['symbol','date_utc'])
             .reset_index(drop=True))
 
-OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'volume_history'))
+# Detect source from CSV path (reddit or stocktwits)
+if 'reddit' in CSV_PATH.lower():
+    source = 'reddit'
+elif 'stocktwits' in CSV_PATH.lower():
+    source = 'stocktwits'
+else:
+    # Default to stocktwits if can't detect
+    source = 'stocktwits'
+    print(f"Warning: Could not detect source from path, defaulting to 'stocktwits'")
+
+OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'volume_history', source))
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 print("OUTPUT_DIR:", OUTPUT_DIR)

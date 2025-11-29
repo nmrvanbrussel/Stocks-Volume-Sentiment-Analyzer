@@ -104,10 +104,10 @@ def script_scrape_stockwits():
             print(f"Message {i}:\n    {message_text}")
 
         
-        # Save to data/raw/stocktwits/YYYY/MM/DD/
+        # Save to data/raw/stocktwits/TICKER/YYYY/MM/DD/
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         today = datetime.utcnow()
-        out_dir = os.path.join(project_root, 'data', 'raw', 'stocktwits', f"{today:%Y}", f"{today:%m}", f"{today:%d}")
+        out_dir = os.path.join(project_root, 'data', 'raw', 'stocktwits', f"{symbol}", f"{today:%Y}", f"{today:%m}", f"{today:%d}")
         os.makedirs(out_dir, exist_ok=True)
         filename = os.path.join(out_dir, f"stocktwits_messages_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
         

@@ -5,24 +5,49 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 from datetime import datetime
 
+# ============================================================================
+# STEP 1: Imports and Setup
+# ============================================================================
+# Same imports as stockwits_sentiment_analyzer.py
+# We need pandas for data manipulation, torch for GPU, transformers for FinBERT
 
-# 1) Input CSV from your scraper
-CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\stocktwits\2025\11\29\stocktwits_messages_DGXX_20251129_195929.csv"  # change as needed
-TEXT_COL = "message"
+# ============================================================================
+# STEP 2: CSV Path Configuration
+# ============================================================================
+# Input CSV from Reddit scraper
+CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\GOOG\2025\11\29\reddit_posts_GOOG_20251129_212349.csv"  # change as needed
+
+# For Reddit, we'll combine title + text for better sentiment analysis
+# TEXT_COL will be created from combining 'title' and 'text' columns
 SYMBOL_COL = "symbol"
 
-# 2) Load data
+# ============================================================================
+# STEP 3: Data Loading and Preparation
+# ============================================================================
+# Load data
 df = pd.read_csv(CSV_PATH)
-df[TEXT_COL] = df[TEXT_COL].astype(str).fillna("")
 
-# 3) FinBERT pipeline
+# Combine title and text for better sentiment analysis
+# Reddit posts have both title and text, combining gives more context
+df['title'] = df['title'].fillna('').astype(str)
+df['text'] = df['text'].fillna('').astype(str)
+df['combined_text'] = df['title'] + ' ' + df['text']
+df['combined_text'] = df['combined_text'].astype(str).fillna("")
+
+# Use combined_text as our TEXT_COL for sentiment analysis
+TEXT_COL = "combined_text"
+
+# ============================================================================
+# STEP 4: FinBERT Model Setup
+# ============================================================================
+# Same FinBERT model as stockwits analyzer
 MODEL_ID = "ProsusAI/finbert"
 DEVICE = 0 if torch.cuda.is_available() else -1
 tok = AutoTokenizer.from_pretrained(MODEL_ID)
 clf = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
 pipe = pipeline("text-classification", model = clf, tokenizer = tok, top_k = None, truncation = True, device = DEVICE)
 
-# pk ​= eℓpos ​+ eℓneu ​+ eℓneg​eℓk​​,k ∈ {pos, neu, neg}, softmax function to get probabilities
+# pk = eℓpos + eℓneu + eℓneg​eℓk​​,k ∈ {pos, neu, neg}, softmax function to get probabilities
 
 #This would come out of pipe(text) 
 
@@ -32,7 +57,10 @@ pipe = pipeline("text-classification", model = clf, tokenizer = tok, top_k = Non
 #  {"label": "negative", "score": 0.08}
 #]
 
-# 4) Run in batches for stability
+# ============================================================================
+# STEP 5: Batch Inference
+# ============================================================================
+# Run in batches for stability - same function as stockwits
 def infer_batch(texts, batch_size = 64): #Breaks the list of messages into chunks with batch sizes 64
     print("Creating Chunks")
     out = [] 
@@ -41,11 +69,15 @@ def infer_batch(texts, batch_size = 64): #Breaks the list of messages into chunk
         #[0,b), [b,2b), …, [kb,min((k+1)b,N))
     return out
 
+# Run inference on combined text column
 scores = infer_batch(df[TEXT_COL].tolist())
 
 #We cannot use append here as this would create a nested list 
 
-# 5) Convert scores to numeric columns
+# ============================================================================
+# STEP 6: Convert Scores to DataFrame
+# ============================================================================
+# Convert scores to numeric columns - same function as stockwits
 def to_row(score_list):
     m = {d["label"].lower(): d["score"] for d in score_list}
     pred_label = max(m, key = m.get) #argmax over the label scores 
@@ -73,6 +105,10 @@ res = pd.concat([df.reset_index(drop=True), probs_df], axis=1)
 #  {"label":"negative","score":p_neg}
 #]
 
+# ============================================================================
+# STEP 7: Summarization
+# ============================================================================
+# Summarize by symbol - same function as stockwits
 def summarize(group):
     print("Summarizing")
     n = len(group)
@@ -103,31 +139,38 @@ def summarize(group):
 
 summary = res.groupby(SYMBOL_COL, dropna=False).apply(summarize, include_groups = False).reset_index()
 
+# ============================================================================
+# STEP 8: File Output Paths
+# ============================================================================
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 ticker_val = str(df[SYMBOL_COL].iloc[0].strip().upper())
 
-# Write per-message outputs to data/processed/finbert/YYYY/MM/DD/
+# Write per-message outputs to data/processed/finbert/reddit/{SYMBOL}/{YEAR}/{MONTH}/{DAY}/
 today = datetime.utcnow()
-processed_dir = os.path.join(project_root, 'data', 'processed', 'finbert', 'stocktwits', f"{ticker_val}", f"{today:%Y}", f"{today:%m}", f"{today:%d}")
+processed_dir = os.path.join(project_root, 'data', 'processed', 'finbert', 'reddit', f"{ticker_val}", f"{today:%Y}", f"{today:%m}", f"{today:%d}")
 os.makedirs(processed_dir, exist_ok=True)
 enriched_out = os.path.join(
     processed_dir,
     f"{os.path.splitext(os.path.basename(CSV_PATH))[0]}_with_finbert.csv"
 )
 
-# Write summary to reports/stocktwits/{SYMBOL}/{YEAR}/{MONTH}/{DAY}/
-reports_dir = os.path.join(project_root, 'reports', 'stocktwits', f"{ticker_val}", f"{today:%Y}", f"{today:%m}", f"{today:%d}")
+# Write summary to reports/reddit/{SYMBOL}/{YEAR}/{MONTH}/{DAY}/
+reports_dir = os.path.join(project_root, 'reports', 'reddit', f"{ticker_val}", f"{today:%Y}", f"{today:%m}", f"{today:%d}")
 os.makedirs(reports_dir, exist_ok=True)
 summary_out = os.path.join(
     reports_dir,
-    f"summary_finbert_{ts}.csv"
+    f"summary_reddit_finbert_{ts}.csv"
 )
 
+# ============================================================================
+# STEP 9: Save Files
+# ============================================================================
 res.to_csv(enriched_out, index=False, encoding="utf-8")
 summary.to_csv(summary_out, index=False, encoding="utf-8")
 
 print(f"Saved per-message results: {enriched_out}")
 print(f"Saved summary: {summary_out}")
 print(summary)
+

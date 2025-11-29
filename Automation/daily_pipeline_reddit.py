@@ -6,11 +6,11 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-SYMBOLS = ["DGXX"] 
+SYMBOLS = ["NVDA", "AAPL", "GOOG"] 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SCRAPE = PROJECT_ROOT / "Scraping" / "scraping_stockwits.py"
-SENTI  = PROJECT_ROOT / "Sentiment_Analysis" / "stockwits_sentiment_analyzer.py"
+REDDIT_SCRAPE = PROJECT_ROOT / "Scraping" / "scraping_reddit.py"
+REDDIT_SENTI  = PROJECT_ROOT / "Sentiment_Analysis" / "reddit_sentiment_analyzer.py"
 VOLUME = PROJECT_ROOT / "Volume" / "Volume_Sentiment_Analyzer.py"
 
 def replace_in_file(path: Path, pattern: str, repl: str, flags=re.M):
@@ -21,10 +21,17 @@ def replace_in_file(path: Path, pattern: str, repl: str, flags=re.M):
     path.write_text(new_text, encoding="utf-8")
     return n
 
-def latest_csv_for_symbol(symbol: str) -> str | None:
+def latest_csv_for_symbol(symbol: str, source: str = "reddit") -> str | None:
+    """Get latest CSV for symbol from specified source (reddit or stocktwits)."""
     today = datetime.utcnow()
-    day_dir = PROJECT_ROOT / "data" / "raw" / "stocktwits" / symbol / f"{today:%Y}" / f"{today:%m}" / f"{today:%d}"
-    files = glob.glob(str(day_dir / f"stocktwits_messages_{symbol}_*.csv"))
+    day_dir = PROJECT_ROOT / "data" / "raw" / source / symbol / f"{today:%Y}" / f"{today:%m}" / f"{today:%d}"
+    
+    if source == "reddit":
+        pattern = f"reddit_posts_{symbol}_*.csv"
+    else:  # stocktwits
+        pattern = f"stocktwits_messages_{symbol}_*.csv"
+    
+    files = glob.glob(str(day_dir / pattern))
     if not files:
         return None
     return max(files, key=os.path.getmtime)
@@ -36,7 +43,7 @@ def run_script(path: Path):
 
 def run_pipeline():
     print("=" * 80)
-    print(f"Daily pipeline started @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Reddit Daily Pipeline started @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
 
     ok = []
@@ -48,33 +55,33 @@ def run_pipeline():
         print("-" * 80)
 
         try:
-            # 1) Set symbol in scraper and run it
+            # 1) Set symbol in Reddit scraper and run it
             replace_in_file(
-                SCRAPE,
+                REDDIT_SCRAPE,
                 r'^(\s*)symbol\s*=\s*r?["\'][^"\']*["\']',
                 rf'\1symbol = "{sym}"'
             )
 
-            run_script(SCRAPE)
+            run_script(REDDIT_SCRAPE)
             time.sleep(2)  # allow filesystem to flush
 
             # Resolve the CSV just created
-            csv_path = latest_csv_for_symbol(sym)
+            csv_path = latest_csv_for_symbol(sym, "reddit")
             if not csv_path:
-                raise RuntimeError(f"No CSV found for {sym} in today's folder.")
+                raise RuntimeError(f"No Reddit CSV found for {sym} in today's folder.")
             print(f"CSV: {csv_path}")
 
-            # Point sentiment script to CSV and run
+            # Point Reddit sentiment script to CSV and run
             escaped_csv = csv_path.replace("\\", "\\\\")
             replace_in_file(
-                SENTI,
+                REDDIT_SENTI,
                 r'^(\s*)CSV_PATH\s*=\s*r?["\'][^"\']*["\']',
                 rf'\1CSV_PATH = r"{escaped_csv}"'
             )
 
-            run_script(SENTI)
+            run_script(REDDIT_SENTI)
 
-            # 4) Point volume script to CSV and run
+            # Point volume script to CSV and run
             escaped_csv = csv_path.replace("\\", "\\\\")
             replace_in_file(
                 VOLUME,
@@ -94,9 +101,9 @@ def run_pipeline():
             print(f"✗ Error for {sym}: {e}")
             failed.append(sym)
 
-    # AI generated prints
+    # Pipeline summary
     print("\n" + "=" * 80)
-    print("PIPELINE SUMMARY")
+    print("REDDIT PIPELINE SUMMARY")
     print("=" * 80)
     print(f"Total: {len(SYMBOLS)}")
     print(f"Success: {len(ok)} -> {', '.join(ok) if ok else '-'}")
@@ -105,3 +112,4 @@ def run_pipeline():
 
 if __name__ == "__main__":
     run_pipeline()
+
