@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+GOOG,2580.0,0.1043,0.1798,0.7159,0.1541,0.2148,0.6311,-0.0607,-156.5864,0.8114

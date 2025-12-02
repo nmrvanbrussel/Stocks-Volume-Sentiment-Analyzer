@@ -7,17 +7,18 @@ import yfinance as yf
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from pathlib import Path
+import pandas as pd
 
 # Load environment variables from .env file in project root
-project_root = Path(__file__).resolve().parent.parent
-env_path = project_root / ".env"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+env_path = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=env_path)
 
 # Get credentials from environment
 CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 USER_AGENT = os.getenv("REDDIT_USER_AGENT", "wsb-ticker-scraper/0.1 by Niels van Brussel")
-SUBREDDIT = ("wallstreetbets")
+SUBREDDIT = "thetagang"
 
 # Validate credentials
 if not CLIENT_ID or not CLIENT_SECRET:
@@ -67,7 +68,7 @@ def script_scrape_reddit():
     """Main Reddit scraping function."""
     print("Reddit Scraping Script Start")
     
-    symbol = "GOOG"  # Will be replaced by daily_pipeline_reddit.py
+    symbol = "SOUN"  # Will be replaced by daily_pipeline_reddit.py
     
     # Authenticate
     token = get_reddit_token()
@@ -93,6 +94,7 @@ def script_scrape_reddit():
     }
     
     for query in queries:
+        print(f"--- Started scraping for {SUBREDDIT} ---")
         print(f"--- Started scraping for {query} ---")
         
         after = None
@@ -169,28 +171,51 @@ def script_scrape_reddit():
             'comments': post.get('num_comments', 0),
             'timestamp_raw': str(created_utc) if created_utc else '',
             'timestamp_iso': timestamp_iso,
-            'post_id': post.get('name', '')
+            'post_id': post.get('name', ''),
+            'subreddit': SUBREDDIT
         })
     
-    # Save to data/raw/reddit/{SYMBOL}/{YEAR}/{MONTH}/{DAY}/
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Path: data/raw/reddit/{SYMBOL}/{YEAR}/{MONTH}/{DAY}/
     today = datetime.utcnow()
-    out_dir = os.path.join(project_root, 'data', 'raw', 'reddit', symbol, 
+    out_dir = os.path.join(PROJECT_ROOT, 'data', 'raw', 'reddit', symbol, 
                           f"{today:%Y}", f"{today:%m}", f"{today:%d}")
     os.makedirs(out_dir, exist_ok=True)
     
-    filename = os.path.join(out_dir, 
-                           f"reddit_posts_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+    filename = os.path.join(out_dir, f"reddit_posts_{symbol}_{today:%Y%m%d}.csv")
     
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        if posts_data:
-            writer = csv.DictWriter(f, fieldnames=posts_data[0].keys())
-            writer.writeheader()
-            writer.writerows(posts_data)
+    # 1. Convert new data to DataFrame
+    new_df = pd.DataFrame(posts_data)
     
-    print(f"\nSaved {len(posts_data)} posts to {filename}")
+    # 2. Load existing data if file exists
+    if os.path.exists(filename):
+        try:
+            existing_df = pd.read_csv(filename)
+            # Combine old and new
+            combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+        except pd.errors.EmptyDataError:
+            combined_df = new_df
+    else:
+        combined_df = new_df
+
+    # 3. Clean and Sort
+    if not combined_df.empty:
+        # Deduplicate
+        combined_df = combined_df.drop_duplicates(subset=['post_id'])
+    
+        # Force 'timestamp_raw' to numeric so sorting works
+        combined_df['timestamp_raw'] = pd.to_numeric(combined_df['timestamp_raw'], errors='coerce')
+        combined_df = combined_df.dropna(subset=['timestamp_raw'])
+    
+        # SORT: Now this will work because everything is a number
+        combined_df = combined_df.sort_values(by='timestamp_raw', ascending=False)
+        
+        combined_df.to_csv(filename, index=False)
+        
+        print(f"\nSaved {len(combined_df)} sorted posts to {filename}")
+    else:
+        print("\nNo data to save.")
+
     print("Script Finished")
 
 if __name__ == "__main__":
     script_scrape_reddit()
-

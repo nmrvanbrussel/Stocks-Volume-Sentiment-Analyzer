@@ -6,7 +6,36 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-SYMBOLS = ["NVDA", "AAPL", "GOOG"] 
+SYMBOLS = [
+    # Big Tech / Model Builders
+    "NVDA", "AAPL", "GOOG", "MSFT", "META", "AMZN", "TSLA",
+    
+    # AI Hardware & Semis (The "Pick and Shovel" plays)
+    "AMD", "TSM", "AVGO", "MU", "INTC", "ARM",
+    
+    # AI Infrastructure & Servers
+    "SMCI", "DELL", "VRT","IREN"
+    
+    # AI Software & Data
+    "PLTR", "SNOW", "SOUN"
+]
+
+SUBREDDITS = [
+    # High Volume / Hype
+    "wallstreetbets", 
+    "SmallStreetBets",
+    "StockMarket",
+    "stocks",
+    
+    # Serious / Macro
+    "investing",
+    "SecurityAnalysis",
+    "Economics",
+    
+    # Technical / Trading
+    "options",
+    "thetagang"
+]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REDDIT_SCRAPE = PROJECT_ROOT / "Scraping" / "scraping_reddit.py"
@@ -48,58 +77,77 @@ def run_pipeline():
 
     ok = []
     failed = []
-
+    
     for sym in SYMBOLS:
-        print("\n" + "-" * 80)
-        print(f"Symbol: {sym}")
-        print("-" * 80)
+        print("\n" + "#" * 80)
+        print(f"STARTING PIPELINE FOR TICKER: {sym}")
+        print("#" * 80)
 
+        scraping_errors = False
+
+        for sub in SUBREDDITS:
+            print(f"\n--- Scraping {sym} in r/{sub} ---")
+
+            try:
+                # 1) Set SUBREDDIT in Reddit scraper and run it
+                replace_in_file(
+                    REDDIT_SCRAPE,
+                    r'^(\s*)SUBREDDIT\s*=\s*r?["\'][^"\']*["\']',
+                    rf'\1SUBREDDIT = "{sub}"'
+                )
+                # 2) Set symbol in Reddit scraper and run it
+                replace_in_file(
+                    REDDIT_SCRAPE,
+                    r'^(\s*)symbol\s*=\s*r?["\'][^"\']*["\']',
+                    rf'\1symbol = "{sym}"'
+                )
+
+                run_script(REDDIT_SCRAPE)
+                time.sleep(2)  # allow filesystem to flush
+            
+            except Exception as e:
+                print(f"✗ Scraping failed for {sym} in {sub}: {e}")
+                scraping_errors = True
+
+        print(f"\n Processing Combined Data for {sym}...")
+        
         try:
-            # 1) Set symbol in Reddit scraper and run it
-            replace_in_file(
-                REDDIT_SCRAPE,
-                r'^(\s*)symbol\s*=\s*r?["\'][^"\']*["\']',
-                rf'\1symbol = "{sym}"'
-            )
-
-            run_script(REDDIT_SCRAPE)
-            time.sleep(2)  # allow filesystem to flush
-
-            # Resolve the CSV just created
+            # Find the file we just filled up
             csv_path = latest_csv_for_symbol(sym, "reddit")
             if not csv_path:
-                raise RuntimeError(f"No Reddit CSV found for {sym} in today's folder.")
-            print(f"CSV: {csv_path}")
+                raise RuntimeError(f"No Reddit CSV found for {sym} (Scraping likely failed completely).")
+            
+            print(f"Target CSV: {csv_path}")
 
-            # Point Reddit sentiment script to CSV and run
+            # Update Sentiment Script Path
             escaped_csv = csv_path.replace("\\", "\\\\")
             replace_in_file(
                 REDDIT_SENTI,
                 r'^(\s*)CSV_PATH\s*=\s*r?["\'][^"\']*["\']',
                 rf'\1CSV_PATH = r"{escaped_csv}"'
             )
-
+            # Run FinBERT (Once per ticker)
             run_script(REDDIT_SENTI)
 
-            # Point volume script to CSV and run
-            escaped_csv = csv_path.replace("\\", "\\\\")
+            # Update Volume Script Path
             replace_in_file(
                 VOLUME,
                 r'^(\s*)CSV_PATH\s*=\s*r?["\'][^"\']*["\']',
                 rf'\1CSV_PATH = r"{escaped_csv}"'
             )
-
+            # Run Volume Analysis (Once per ticker)
             run_script(VOLUME)
 
-            ok.append(sym)
-            print(f"✓ Done: {sym}")
+            if not scraping_errors:
+                ok.append(sym)
+                print(f"✓ FULL SUCCESS: {sym}")
+            else:
+                failed.append(f"{sym} (Partial)")
+                print(f"⚠ PARTIAL SUCCESS: {sym} (Some subreddits failed)")
 
-        except subprocess.CalledProcessError as e:
-            print(f"✗ Script failed for {sym}: {e}")
-            failed.append(sym)
         except Exception as e:
-            print(f"✗ Error for {sym}: {e}")
-            failed.append(sym)
+            print(f"✗ Processing failed for {sym}: {e}")
+            failed.append(f"{sym} (Processing)")
 
     # Pipeline summary
     print("\n" + "=" * 80)

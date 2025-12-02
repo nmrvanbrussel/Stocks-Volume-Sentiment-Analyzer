@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 
 #Change CSV_PATH ofc
-CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\GOOG\2025\11\29\reddit_posts_GOOG_20251129_212349.csv"
+CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\SOUN\2025\12\02\reddit_posts_SOUN_20251202.csv"
 
 df = pd.read_csv(CSV_PATH)
 
@@ -23,18 +23,29 @@ def daily_volume_table(df, symbol):
         tmin = g['ts'].min()
         tmax = g['ts'].max()
         
-        #(For display)
+        # 1. Real Duration (For display)
         real_duration_min = (tmax - tmin).total_seconds() / 60.0
         
-        # Math Duration (For Rate Calculation)
+        # 2. Math Duration (Enforce 1.0 min floor)
         math_duration_min = max(real_duration_min, 1.0)
+        
+        # We run into small sample variance problem quite easily, due to low volume
+        # If we have fewer than 5 messages, the "window" is likely coincidence.
+        # So we force the rate to be the Daily Average (Background Noise).
+        if n < 5:
+            # Example: 4 messages / 24 hours = 0.16 (Low/Quiet)
+            rate = n / 24.0  
+        else:
+            # We have enough data to trust the window
+            # Calculate true Burst Velocity
+            rate = (n / math_duration_min) * 60.0
         
         return pd.Series({
             'messages': n,
             'tmin_utc': tmin,
             'tmax_utc': tmax,
-            'window_minutes': round(real_duration_min, 2),     # Show the REAL short time
-            'msgs_per_hour': round((n / math_duration_min) * 60.0, 3), # Use the SAFE time
+            'window_minutes': round(real_duration_min, 2),
+            'msgs_per_hour': round(rate, 3), 
             'avg_seconds_between': round((tmax - tmin).total_seconds()/max(n-1,1), 2),
         })
 

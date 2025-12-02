@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+NVDA,3069.0,0.117,0.1642,0.7188,0.1736,0.1907,0.6357,-0.0171,-52.5032,0.8025

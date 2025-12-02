@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+SOUN,291.0,0.1031,0.1443,0.7526,0.1636,0.1705,0.666,-0.0069,-2.0058,0.8111

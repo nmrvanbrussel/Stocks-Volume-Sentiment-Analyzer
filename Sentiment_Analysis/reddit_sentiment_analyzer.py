@@ -15,7 +15,7 @@ from datetime import datetime
 # STEP 2: CSV Path Configuration
 # ============================================================================
 # Input CSV from Reddit scraper
-CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\GOOG\2025\11\29\reddit_posts_GOOG_20251129_212349.csv"  # change as needed
+CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\SOUN\2025\12\02\reddit_posts_SOUN_20251202.csv"  # change as needed
 
 # For Reddit, we'll combine title + text for better sentiment analysis
 # TEXT_COL will be created from combining 'title' and 'text' columns

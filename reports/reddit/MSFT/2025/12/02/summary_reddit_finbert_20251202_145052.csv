@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+MSFT,2901.0,0.1055,0.1517,0.7428,0.1606,0.1899,0.6496,-0.0293,-84.9419,0.8125

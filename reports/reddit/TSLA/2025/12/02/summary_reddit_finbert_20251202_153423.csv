@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+TSLA,3188.0,0.0712,0.2011,0.7277,0.1263,0.2344,0.6392,-0.1081,-344.5347,0.8105

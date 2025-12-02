@@ -1,0 +1,2 @@
+symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
+META,2258.0,0.0952,0.2232,0.6816,0.1497,0.2606,0.5897,-0.1109,-250.3094,0.8081
