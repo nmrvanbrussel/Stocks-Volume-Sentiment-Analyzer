@@ -6,36 +6,29 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-SYMBOLS = [
-    # Big Tech / Model Builders
-    "NVDA", "AAPL", "GOOG", "MSFT", "META", "AMZN", "TSLA",
-    
-    # AI Hardware & Semis (The "Pick and Shovel" plays)
-    "AMD", "TSM", "AVGO", "MU", "INTC", "ARM",
-    
-    # AI Infrastructure & Servers
-    "SMCI", "DELL", "VRT","IREN"
-    
-    # AI Software & Data
-    "PLTR", "SNOW", "SOUN"
-]
+SYMBOLS = ["NVDA"]
+
+#"AAPL", "GOOG", "MSFT", "META", "AMZN", "TSLA", "AMD",
 
 SUBREDDITS = [
-    # High Volume / Hype
-    "wallstreetbets", 
-    "SmallStreetBets",
-    "StockMarket",
+    "wallstreetbets",
     "stocks",
-    
-    # Serious / Macro
-    "investing",
-    "SecurityAnalysis",
-    "Economics",
-    
-    # Technical / Trading
+    "StockMarket",
     "options",
-    "thetagang"
+    "superstonk",
+    "Daytrading",
+    "trading",
+    "investing",
+    "pennystocks",
+    "ShortSqueeze",
+    "MomentumTrading",
+    "Finance",
+    "FinancialMarkets",
+    "algotrading",
+    "QuantFinance"
 ]
+
+#Run 1 NVDA: TechStocks, GrowthStocks both have super low volume 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REDDIT_SCRAPE = PROJECT_ROOT / "Scraping" / "scraping_reddit.py"

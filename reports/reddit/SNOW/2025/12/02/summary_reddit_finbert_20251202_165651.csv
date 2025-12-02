@@ -1,2 +1,0 @@
-symbol,messages,pos_share,neg_share,neu_share,prob_pos_mean,prob_neg_mean,prob_neu_mean,sentiment_mean,sentiment_total,confidence_mean
-SNOW,1283.0,0.1146,0.1855,0.6999,0.161,0.2215,0.6176,-0.0605,-77.5784,0.805

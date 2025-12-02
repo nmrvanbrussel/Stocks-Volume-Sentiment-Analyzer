@@ -5,26 +5,12 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 from datetime import datetime
 
-# ============================================================================
-# STEP 1: Imports and Setup
-# ============================================================================
-# Same imports as stockwits_sentiment_analyzer.py
-# We need pandas for data manipulation, torch for GPU, transformers for FinBERT
-
-# ============================================================================
-# STEP 2: CSV Path Configuration
-# ============================================================================
-# Input CSV from Reddit scraper
-CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\SOUN\2025\12\02\reddit_posts_SOUN_20251202.csv"  # change as needed
+CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\NVDA\2025\12\02\reddit_posts_NVDA_20251202.csv"  # change as needed
 
 # For Reddit, we'll combine title + text for better sentiment analysis
 # TEXT_COL will be created from combining 'title' and 'text' columns
 SYMBOL_COL = "symbol"
 
-# ============================================================================
-# STEP 3: Data Loading and Preparation
-# ============================================================================
-# Load data
 df = pd.read_csv(CSV_PATH)
 
 # Combine title and text for better sentiment analysis
@@ -37,29 +23,13 @@ df['combined_text'] = df['combined_text'].astype(str).fillna("")
 # Use combined_text as our TEXT_COL for sentiment analysis
 TEXT_COL = "combined_text"
 
-# ============================================================================
-# STEP 4: FinBERT Model Setup
-# ============================================================================
-# Same FinBERT model as stockwits analyzer
 MODEL_ID = "ProsusAI/finbert"
 DEVICE = 0 if torch.cuda.is_available() else -1
 tok = AutoTokenizer.from_pretrained(MODEL_ID)
 clf = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
 pipe = pipeline("text-classification", model = clf, tokenizer = tok, top_k = None, truncation = True, device = DEVICE)
 
-# pk = eℓpos + eℓneu + eℓneg​eℓk​​,k ∈ {pos, neu, neg}, softmax function to get probabilities
 
-#This would come out of pipe(text) 
-
-#[
-#  {"label": "positive", "score": 0.72},
-#  {"label": "neutral",  "score": 0.20},
-#  {"label": "negative", "score": 0.08}
-#]
-
-# ============================================================================
-# STEP 5: Batch Inference
-# ============================================================================
 # Run in batches for stability - same function as stockwits
 def infer_batch(texts, batch_size = 64): #Breaks the list of messages into chunks with batch sizes 64
     print("Creating Chunks")
@@ -74,9 +44,6 @@ scores = infer_batch(df[TEXT_COL].tolist())
 
 #We cannot use append here as this would create a nested list 
 
-# ============================================================================
-# STEP 6: Convert Scores to DataFrame
-# ============================================================================
 # Convert scores to numeric columns - same function as stockwits
 def to_row(score_list):
     m = {d["label"].lower(): d["score"] for d in score_list}
@@ -105,43 +72,58 @@ res = pd.concat([df.reset_index(drop=True), probs_df], axis=1)
 #  {"label":"negative","score":p_neg}
 #]
 
-# ============================================================================
-# STEP 7: Summarization
-# ============================================================================
+res['date'] = pd.to_datetime(res['timestamp_iso']).dt.date
 # Summarize by symbol - same function as stockwits
 def summarize(group):
-    print("Summarizing")
+    # --- CONFIG ---
+    PRIOR_N = 5  # We assume 5 "ghost" neutral messages exist every day
+    PRIOR_SCORE = 0 # These ghost messages have a score of 0 (Neutral)
+    # --------------
+
     n = len(group)
+    
+    # 1. Raw Stats
     pos_share = (group["pred_label"] == "positive").mean()
     neg_share = (group["pred_label"] == "negative").mean()
     neu_share = (group["pred_label"] == "neutral").mean()
-
-    pos_mean = group["prob_positive"].mean()
-    neg_mean = group["prob_negative"].mean()
-    neu_mean = group["prob_neutral"].mean()
-
-    sentiment_total = group["sentiment_signed"].sum()
-    sentiment_mean  = group["sentiment_signed"].mean()
-    conf_mean = group["confidence"].mean()
-
+    
+    # 2. Weighted Sentiment (Crowd Weight)
+    weights = group["score"].apply(lambda x: max(x, 1)) 
+    weighted_sum = (group["sentiment_signed"] * weights).sum()
+    total_weight = weights.sum()
+    
+    # 3. BAYESIAN SMOOTHING LOGIC
+    # Formula: (Sum of Real Scores + (Prior_N * Prior_Score)) / (Real N + Prior N)
+    # Since Prior_Score is 0, it simplifies to: Sum / (N + 5)
+    
+    # Apply to Simple Mean
+    real_sum = group["sentiment_signed"].sum()
+    sentiment_mean_smoothed = real_sum / (n + PRIOR_N)
+    
+    # Apply to Weighted Mean (We add hypothetical "average" weight to the priors)
+    avg_weight = total_weight / n if n > 0 else 1
+    weighted_sum_smoothed = weighted_sum / (total_weight + (PRIOR_N * avg_weight))
+    
     return pd.Series({
         "messages": n,
+        # We replace the raw means with the smoothed versions
+        "sentiment_weighted": round(weighted_sum_smoothed, 4), 
+        "sentiment_mean": round(sentiment_mean_smoothed, 4),
+        
         "pos_share": round(pos_share, 4),
         "neg_share": round(neg_share, 4),
         "neu_share": round(neu_share, 4),
-        "prob_pos_mean": round(pos_mean, 4),
-        "prob_neg_mean": round(neg_mean, 4),
-        "prob_neu_mean": round(neu_mean, 4),
-        "sentiment_mean": round(sentiment_mean, 4),
-        "sentiment_total": round(sentiment_total, 4),
-        "confidence_mean": round(conf_mean, 4),
+        "prob_pos_mean": round(group["prob_positive"].mean(), 4),
+        "prob_neg_mean": round(group["prob_negative"].mean(), 4),
+        "prob_neu_mean": round(group["prob_neutral"].mean(), 4),
+        "sentiment_total": round(real_sum, 4),
+        "confidence_mean": round(group["confidence"].mean(), 4),
     })
 
-summary = res.groupby(SYMBOL_COL, dropna=False).apply(summarize, include_groups = False).reset_index()
+# GROUP BY SYMBOL *AND* DATE
+summary = res.groupby([SYMBOL_COL, 'date'], dropna=False).apply(summarize, include_groups=False).reset_index()
 
-# ============================================================================
-# STEP 8: File Output Paths
-# ============================================================================
+
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -164,13 +146,10 @@ summary_out = os.path.join(
     f"summary_reddit_finbert_{ts}.csv"
 )
 
-# ============================================================================
-# STEP 9: Save Files
-# ============================================================================
+
 res.to_csv(enriched_out, index=False, encoding="utf-8")
 summary.to_csv(summary_out, index=False, encoding="utf-8")
 
 print(f"Saved per-message results: {enriched_out}")
 print(f"Saved summary: {summary_out}")
 print(summary)
-

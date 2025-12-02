@@ -2,23 +2,43 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import yfinance as yf
 import os
 import glob
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from plotly.subplots import make_subplots
 
 # ==============================================================================
-# HOW TO RUN
-# 1. Terminal: cd "C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping"
-# 2. Run: streamlit run Dashboard/dashboard_test.py
+# 1. APP CONFIGURATION
 # ==============================================================================
+st.set_page_config(
+    page_title="Volume and Sentiment Project",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="Market Sentiment Dashboard", layout="wide")
+# Clean, professional styling
+st.markdown("""
+<style>
+    .stApp { background-color: #0E1117; }
+    .metric-card {
+        background-color: #161B22;
+        border: 1px solid #30363D;
+        border-radius: 6px;
+        padding: 15px;
+    }
+    div[data-testid="stMetricValue"] { font-size: 24px; color: #E6EDF3; }
+    div[data-testid="stMetricLabel"] { font-size: 14px; color: #8B949E; }
+</style>
+""", unsafe_allow_html=True)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# --- LOAD DATA FUNCTIONS ---
+# ==============================================================================
+# 2. DATA LOADING FUNCTIONS
+# ==============================================================================
 @st.cache_data
 def load_volume_data(source="stocktwits"):
     """Loads daily volume stats for all tickers."""
@@ -30,6 +50,7 @@ def load_volume_data(source="stocktwits"):
         try:
             temp_df = pd.read_csv(f)
             temp_df["source"] = source
+            temp_df.columns = [c.lower() for c in temp_df.columns]
             df_list.append(temp_df)
         except Exception:
             continue
@@ -44,51 +65,92 @@ def load_volume_data(source="stocktwits"):
 
 @st.cache_data
 def load_sentiment_summary(ticker, source="stocktwits"):
-    """Loads the summary reports for a specific ticker."""
-    reports_root = PROJECT_ROOT / f"reports_{source}"
-    files = list(reports_root.rglob("*summary*finbert*.csv"))
+    """
+    Loads the summary reports for a specific ticker.
+    UPDATED: 
+    1. Removes duplicates if multiple runs occurred on the same day.
+    2. Respects the 'date' column INSIDE the file if it exists (fixes the single-bar bug).
+    """
+    path_nested = PROJECT_ROOT / "reports" / source
+    path_flat = PROJECT_ROOT / f"reports_{source}"
     
-    df_list = []
-    for f in files:
-        try:
-            match = re.search(r"(\d{8})", f.name)
-            if not match: continue
-            
-            date_str = match.group(1)
-            dt_obj = datetime.strptime(date_str, "%Y%m%d")
-
-            temp = pd.read_csv(f)
-            temp.columns = [c.lower() for c in temp.columns]
-            
-            if "symbol" in temp.columns:
-                temp["symbol"] = temp["symbol"].astype(str).str.upper()
-                temp = temp[temp["symbol"] == ticker]
-            
-            if not temp.empty:
-                temp["date"] = dt_obj
-                df_list.append(temp)
-        except Exception:
-            continue
-            
-    if not df_list:
-        return pd.DataFrame()
+    sent_path = None
+    if path_nested.exists():
+        sent_path = path_nested
+    elif path_flat.exists():
+        sent_path = path_flat
+    
+    sent_dfs = []
+    if sent_path:
+        # Recursively find all summary files
+        sent_files = list(sent_path.rglob("*summary*finbert*.csv"))
+        # Sort files to ensure we process them in chronological order
+        sent_files = sorted(sent_files)
         
-    return pd.concat(df_list, ignore_index=True).sort_values("date")
+        for f in sent_files:
+            try:
+                # 1. Extract Date from Filename (Fallback)
+                match = re.search(r"(\d{8})", f.name)
+                if not match: continue
+                file_date_obj = datetime.strptime(match.group(1), "%Y%m%d")
+                
+                # 2. Read CSV
+                temp = pd.read_csv(f)
+                temp.columns = [c.lower() for c in temp.columns]
+                
+                if "symbol" in temp.columns:
+                    temp["symbol"] = temp["symbol"].astype(str).str.upper()
+                    
+                # 3. Filter for Ticker
+                temp = temp[temp["symbol"] == ticker]
+                
+                if not temp.empty:
+                    # --- THE FIX: Priority Check for Internal Date ---
+                    # If the analyzer saved a 'date' column, use it (it contains the real historical dates).
+                    # If not, fall back to the filename date.
+                    if "date" in temp.columns:
+                        temp["date"] = pd.to_datetime(temp["date"])
+                    else:
+                        temp["date"] = file_date_obj
+                        
+                    sent_dfs.append(temp)
+            except: continue
+        
+    sentiment_df = pd.concat(sent_dfs, ignore_index=True) if sent_dfs else pd.DataFrame()
+    
+    if not sentiment_df.empty:
+        # --- DEDUPLICATION LOGIC ---
+        # 1. Ensure date is datetime for sorting
+        sentiment_df["date"] = pd.to_datetime(sentiment_df["date"])
+        
+        # 2. Sort by date
+        sentiment_df = sentiment_df.sort_values("date")
+        
+        # 3. Drop Duplicates
+        # If we have multiple rows for "Dec 2nd", keep the LAST one loaded (the most recent run)
+        sentiment_df = sentiment_df.drop_duplicates(subset=['date', 'symbol'], keep='last')
+
+    return sentiment_df
 
 @st.cache_data
 def load_detailed_sentiment(ticker, source="stocktwits"):
     """
-    Loads per-post sentiment data (e.g., reddit_posts_NVDA_..._with_finbert.csv)
-    to calculate daily average sentiment from granular data.
+    Loads per-post sentiment data to calculate daily average sentiment.
+    FIXED: Now explicitly checks 'data/processed/finbert/{source}' which is where your analyzer saves files.
     """
-    # Path: data/processed/finbert/{source}/{ticker}/YYYY/MM/DD/...
-    # Or your specific structure: data/processed/finbert/{source}/{ticker}/...
-    # We will search recursively under data/processed
+    # 1. Try the specific path structure from your Reddit Analyzer (includes 'finbert')
+    path_finbert = PROJECT_ROOT / "data" / "processed" / "finbert" / source
+    # 2. Fallback to standard path
+    path_standard = PROJECT_ROOT / "data" / "processed" / source
     
-    processed_root = PROJECT_ROOT / "data" / "processed"
-    
-    # Pattern to match: *{ticker}*with_finbert.csv
-    # This matches files like: reddit_posts_NVDA_20251130_with_finbert.csv
+    processed_root = None
+    if path_finbert.exists():
+        processed_root = path_finbert
+    elif path_standard.exists():
+        processed_root = path_standard
+    else:
+        return pd.DataFrame()
+
     files = list(processed_root.rglob(f"*{ticker}*with_finbert.csv"))
     
     df_list = []
@@ -96,27 +158,24 @@ def load_detailed_sentiment(ticker, source="stocktwits"):
         try:
             temp = pd.read_csv(f)
             
-            # Ensure we have the sentiment score column
-            # Check for 'sentiment_signed' (from your CSV) or 'sentiment_score'
+            # Identify the score column
             if 'sentiment_signed' in temp.columns:
                 score_col = 'sentiment_signed'
             elif 'sentiment_score' in temp.columns:
                 score_col = 'sentiment_score'
             else:
-                continue # Skip if no sentiment data
+                continue 
                 
-            # Extract date from timestamp_iso or filename
+            # Date extraction
             if 'timestamp_iso' in temp.columns:
                 temp['date'] = pd.to_datetime(temp['timestamp_iso']).dt.date
             else:
-                # Fallback to filename date
                 match = re.search(r"(\d{8})", f.name)
                 if match:
                     temp['date'] = datetime.strptime(match.group(1), "%Y%m%d").date()
                 else:
                     continue
 
-            # We only need Date and Score for aggregation
             subset = temp[['date', score_col]].copy()
             subset.rename(columns={score_col: 'score'}, inplace=True)
             df_list.append(subset)
@@ -129,189 +188,307 @@ def load_detailed_sentiment(ticker, source="stocktwits"):
     
     combined = pd.concat(df_list, ignore_index=True)
     
-    # Group by Date to get Daily Average
+    # Group by Date for Daily Average
     daily_sent = combined.groupby('date')['score'].mean().reset_index()
+    daily_sent['date'] = pd.to_datetime(daily_sent['date'])
     daily_sent = daily_sent.sort_values('date')
     
     return daily_sent
 
-# --- DASHBOARD LAYOUT ---
+@st.cache_data
+def get_stock_price(ticker, start, end):
+    try:
+        # Fetch history using yfinance
+        df = yf.Ticker(ticker).history(start=start, end=end + timedelta(days=1))
+        return df
+    except Exception:
+        return pd.DataFrame()
 
-st.title("📈 AI-Driven Market Sentiment Dashboard")
-
-# 1. Sidebar Setup
-st.sidebar.header("Data Selection")
-data_source = st.sidebar.radio("Data Source", ["stocktwits", "reddit"])
-
-# 2. Load Volume Data (Master List)
-volume_df = load_volume_data(data_source)
-
-if volume_df.empty:
-    st.error(f"No volume data found in 'data/volume_history/{data_source}'. Please run your pipeline first.")
-    st.stop()
-
-# 3. Ticker Selection
-unique_tickers = sorted(volume_df["symbol"].unique())
-selected_ticker = st.sidebar.selectbox("Select Ticker", unique_tickers)
-
-# 4. Filter Data for Ticker
-ticker_vol = volume_df[volume_df["symbol"] == selected_ticker].sort_values("date_utc")
-ticker_sent_summary = load_sentiment_summary(selected_ticker, data_source)
-ticker_sent_daily = load_detailed_sentiment(selected_ticker, data_source)
-
-# 5. DATE RANGE FILTER
-st.sidebar.markdown("---")
-st.sidebar.header("Timeframe")
-
-if not ticker_vol.empty:
-    min_date = ticker_vol["date_utc"].min().date()
-    max_date = ticker_vol["date_utc"].max().date()
-else:
-    min_date = datetime.now().date()
-    max_date = datetime.now().date()
-
-try:
-    start_date, end_date = st.sidebar.date_input(
-        "Select Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
-except ValueError:
-    st.sidebar.error("Please select a valid range.")
-    start_date, end_date = min_date, max_date
-
-# 6. Apply Filter
-mask_vol = (ticker_vol['date_utc'].dt.date >= start_date) & (ticker_vol['date_utc'].dt.date <= end_date)
-filtered_vol = ticker_vol.loc[mask_vol]
-
-if not ticker_sent_summary.empty:
-    mask_sent = (ticker_sent_summary['date'].dt.date >= start_date) & (ticker_sent_summary['date'].dt.date <= end_date)
-    filtered_sent_summary = ticker_sent_summary.loc[mask_sent]
-else:
-    filtered_sent_summary = pd.DataFrame()
-
-if not ticker_sent_daily.empty:
-    # Ensure date column is datetime for filtering
-    ticker_sent_daily['date'] = pd.to_datetime(ticker_sent_daily['date'])
-    mask_daily = (ticker_sent_daily['date'].dt.date >= start_date) & (ticker_sent_daily['date'].dt.date <= end_date)
-    filtered_sent_daily = ticker_sent_daily.loc[mask_daily]
-else:
-    filtered_sent_daily = pd.DataFrame()
-
-
-# --- KPI METRICS ---
-col1, col2, col3, col4 = st.columns(4)
-
-latest_vol_row = filtered_vol.iloc[-1] if not filtered_vol.empty else None
-
-with col1:
-    if latest_vol_row is not None:
-        st.metric("Total Messages (Period)", f"{int(filtered_vol['messages'].sum())}")
-    else:
-        st.metric("Total Messages", "0")
-
-with col2:
-    if latest_vol_row is not None:
-        if 'msgs_per_hour' in latest_vol_row:
-            st.metric("Latest Velocity", f"{latest_vol_row['msgs_per_hour']:.2f}")
-        else:
-            st.metric("Latest Velocity", "N/A")
-    else:
-        st.metric("Velocity", "N/A")
-
-with col3:
-    if not filtered_sent_daily.empty:
-        latest_s = filtered_sent_daily.iloc[-1]
-        st.metric("Daily Sentiment", f"{latest_s['score']:.4f}")
-    elif not filtered_sent_summary.empty:
-        latest_s = filtered_sent_summary.iloc[-1]
-        st.metric("Sentiment Score", f"{latest_s['sentiment_mean']:.4f}")
-    else:
-        st.metric("Sentiment Score", "N/A")
-
-with col4:
-    st.metric("Source", data_source.capitalize())
-
-# --- CHARTS ---
-
-tab1, tab2 = st.tabs(["📊 Volume & Velocity", "🧠 Sentiment Analysis"])
-
-with tab1:
-    st.subheader(f"Volume Analysis: {selected_ticker}")
+# ==============================================================================
+# 3. PAGE: HOME / METHODOLOGY
+# ==============================================================================
+def render_home():
+    st.title("Volume and Sentiment Project")
+    st.markdown("### Technical Methodology & Architecture")
     
-    if not filtered_vol.empty:
-        # CHART 1: Total Message Volume
-        st.markdown("### 📢 Daily Message Volume")
-        fig_vol = px.bar(
-            filtered_vol, 
-            x='date_utc', 
-            y='messages',
-            title="Total Messages per Day",
-            labels={'messages': 'Message Count', 'date_utc': 'Date'},
-            color_discrete_sequence=['#00CC96']
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### NLP Model: FinBERT")
+        st.markdown("""
+        To accurately gauge investor sentiment, this project utilizes **FinBERT** (ProsusAI), a BERT language model specifically pre-trained on financial text.
+        
+        Unlike standard models trained on Wikipedia, FinBERT understands financial context (e.g., "bullish," "short," "put options").
+        
+        **Classification Logic:**
+        Each scraped message is tokenized and passed through the model softmax layer to output probabilities for three classes:
+        * **Positive** (e.g., "Buying the dip")
+        * **Negative** (e.g., "Puts printed today")
+        * **Neutral** (e.g., "Earnings are on Tuesday")
+        
+        The daily sentiment score is a weighted average of these probabilities across all messages for a given ticker.
+        """)
+
+    with col2:
+        st.markdown("#### Velocity & The Small Sample Problem")
+        st.markdown("""
+        **The Goal:** Calculate message intensity (Messages per Hour) to detect viral bursts.
+        
+        **The Problem (Small Sample Variance):** If a stock has only 2 messages posted 2 minutes apart (pure coincidence), standard velocity math would calculate a rate of **60 messages/hour**. This creates massive false positive spikes on quiet days.
+        
+        **The Solution (Noise Filter):**
+        We implemented a statistical threshold:
+        * If **$n < 5$ messages**: The day is classified as "Low Activity." Velocity is defaulted to the Daily Average ($n/24$), flattening the spike.
+        * If **$n \ge 5$ messages**: We calculate the true Burst Velocity based on the active time window.
+        """)
+        
+        st.latex(r'''
+        \text{Velocity} = \begin{cases} 
+        n / 24 & \text{if } n < 5 \text{ (Noise)} \\
+        (n / \text{ActiveMinutes}) \times 60 & \text{if } n \ge 5 \text{ (Signal)}
+        \end{cases}
+        ''')
+
+    st.markdown("---")
+    st.info("Navigate to **Terminal** in the sidebar to visualize the data.")
+
+# ==============================================================================
+# 4. PAGE: TERMINAL
+# ==============================================================================
+def render_terminal():
+    st.title("Market Terminal")
+    
+    # --- SIDEBAR CONTROLS ---
+    st.sidebar.header("Data Feed")
+    data_source = st.sidebar.selectbox("Source", ["reddit", "stocktwits"], index=0)
+    
+    # Load Data
+    vol_data = load_volume_data(data_source)
+    
+    if vol_data.empty:
+        st.error(f"No volume data found for {data_source}. Please check your pipeline output.")
+        st.stop()
+        
+    st.sidebar.header("Asset Selection")
+    all_tickers = sorted(vol_data["symbol"].unique())
+    ticker = st.sidebar.selectbox("Primary Ticker", all_tickers, index=0)
+    
+    # Load Sentiment Data for Selected Ticker
+    ticker_sent_summary = load_sentiment_summary(ticker, data_source)
+    ticker_sent_daily = load_detailed_sentiment(ticker, data_source)
+
+    # Comparison Feature
+    compare_mode = st.sidebar.checkbox("Compare Ticker?", value=False)
+    ticker2 = None
+    if compare_mode:
+        ticker2 = st.sidebar.selectbox("Comparison Ticker", [t for t in all_tickers if t != ticker])
+
+    st.sidebar.markdown("---")
+    st.sidebar.header("View Settings")
+    
+    # Date Range
+    if not vol_data.empty:
+        min_date = vol_data["date_utc"].min().date()
+        max_date = vol_data["date_utc"].max().date()
+        # Default to full range
+        start_d, end_d = st.sidebar.date_input("Date Range", [min_date, max_date])
+    
+    # Y-Axis Clipping
+    st.sidebar.subheader("Chart Scaling")
+    clip_outliers = st.sidebar.checkbox("Limit Velocity Y-Axis?", value=True)
+    y_limit = None
+    if clip_outliers:
+        curr_max = vol_data[vol_data["symbol"]==ticker]['msgs_per_hour'].max() if not vol_data.empty else 100
+        default_val = min(50.0, float(curr_max))
+        y_limit = st.sidebar.slider("Max Velocity", 5.0, 500.0, default_val)
+
+    # --- FILTERING LOGIC ---
+    def filter_date(df, date_col):
+        if df.empty or date_col not in df.columns:
+            return pd.DataFrame()
+        return df[(df[date_col].dt.date >= start_d) & (df[date_col].dt.date <= end_d)].copy()
+
+    # Primary Ticker Data
+    v1 = filter_date(vol_data[vol_data["symbol"] == ticker], "date_utc")
+    # For sentiment, we filter the pre-loaded ticker-specific dataframes
+    s_daily = filter_date(ticker_sent_daily, "date")
+    s_summary = filter_date(ticker_sent_summary, "date")
+    
+    # Secondary Ticker Data
+    v2 = pd.DataFrame()
+    if ticker2:
+        v2 = filter_date(vol_data[vol_data["symbol"] == ticker2], "date_utc")
+
+    # --- KPI HEADER ---
+    st.markdown(f"### {ticker} Analytics")
+    k1, k2, k3, k4 = st.columns(4)
+    
+    def get_latest(df, col): return df.iloc[-1][col] if not df.empty else 0
+
+    with k1: st.metric("Total Messages", f"{int(v1['messages'].sum())}" if not v1.empty else "0")
+    with k2: st.metric("Peak Velocity", f"{v1['msgs_per_hour'].max():.2f}/hr" if not v1.empty else "0")
+    with k3: st.metric("Latest Sentiment", f"{get_latest(s_summary, 'sentiment_mean'):.3f}" if not s_summary.empty else "N/A")
+    with k4: st.metric("Bullish Share", f"{get_latest(s_summary, 'pos_share'):.1%}" if not s_summary.empty else "N/A")
+
+    # --- CHART 0: PRICE ACTION ---
+    st.markdown("---")
+    st.subheader(f"Price Action ({ticker})")
+    
+    price_df = get_stock_price(ticker, start_d, end_d)
+    
+    if not price_df.empty:
+        fig_price = go.Figure(data=[go.Candlestick(
+            x=price_df.index,
+            open=price_df['Open'],
+            high=price_df['High'],
+            low=price_df['Low'],
+            close=price_df['Close'],
+            name=ticker
+        )])
+        
+        fig_price.update_layout(
+            template="plotly_dark",
+            height=350,
+            margin=dict(l=10, r=10, t=30, b=10),
+            xaxis_rangeslider_visible=False,
+            hovermode="x unified",
+            yaxis_title="Price"
         )
-        fig_vol.update_layout(hovermode="x unified")
+        st.plotly_chart(fig_price, use_container_width=True)
+    else:
+        st.warning(f"Could not load price data for {ticker}. Ensure the ticker is a valid Yahoo Finance symbol.")
+
+    # --- CHART 1: DAILY MESSAGE VOLUME ---
+    st.subheader("Daily Message Volume")
+    
+    if not v1.empty:
+        fig_vol = go.Figure()
+        
+        fig_vol.add_trace(go.Bar(
+            x=v1['date_utc'], y=v1['messages'],
+            name=ticker,
+            marker_color='#87CEFA'
+        ))
+        
+        if not v2.empty:
+            fig_vol.add_trace(go.Bar(
+                x=v2['date_utc'], y=v2['messages'],
+                name=ticker2,
+                marker_color='#D033FF',
+                opacity=0.8
+            ))
+
+        fig_vol.update_layout(
+            template="plotly_dark", 
+            height=350, 
+            margin=dict(l=10, r=10, t=30, b=10),
+            hovermode="x unified",
+            barmode='group' 
+        )
         st.plotly_chart(fig_vol, use_container_width=True)
+    else:
+        st.info("No volume data available.")
+
+    # --- CHART 2: VELOCITY ---
+    st.subheader("Hype Velocity (Messages/Hour)")
+    
+    if not v1.empty:
+        fig_vel = go.Figure()
         
-        # CHART 2: Velocity
-        st.markdown("### ⚡ Discussion Velocity")
-        y_col = 'msgs_per_hour' if 'msgs_per_hour' in filtered_vol.columns else 'daily_avg_rate'
+        fig_vel.add_trace(go.Scatter(
+            x=v1['date_utc'], y=v1['msgs_per_hour'],
+            mode='lines+markers', name=f"{ticker}",
+            line=dict(color='#00F5FF', width=2), marker=dict(size=4)
+        ))
         
-        fig_vel = px.line(
-            filtered_vol, 
-            x='date_utc', 
-            y=y_col,
-            title="Velocity (Intensity of Discussion)",
-            labels={y_col: 'Rate', 'date_utc': 'Date'},
-            markers=True,
-            line_shape='linear'
+        if not v2.empty:
+            fig_vel.add_trace(go.Scatter(
+                x=v2['date_utc'], y=v2['msgs_per_hour'],
+                mode='lines', name=f"{ticker2}",
+                line=dict(color='#FF00FF', width=2, dash='dot')
+            ))
+
+        if clip_outliers and y_limit:
+            fig_vel.update_yaxes(range=[0, y_limit])
+
+        fig_vel.update_layout(
+            template="plotly_dark", 
+            height=350, 
+            margin=dict(l=10, r=10, t=30, b=10),
+            legend=dict(orientation="h", y=1.1),
+            hovermode="x unified",
+            yaxis_title="Messages per Hour"
         )
-        fig_vel.update_traces(line_color='#636EFA', line_width=3)
-        fig_vel.update_layout(hovermode="x unified")
         st.plotly_chart(fig_vel, use_container_width=True)
 
+    # --- CHART 3: DAILY SENTIMENT (With Toggle) ---
+    st.markdown("---")
+    st.subheader(f"Daily Average Sentiment ({ticker})")
+    
+    # NEW: Toggle for weighting scheme
+    sent_mode = st.radio(
+        "Weighting Scheme", 
+        ["Equal Weight (Standard)", "Crowd Weight (Upvotes)"], 
+        horizontal=True,
+        key="sent_mode"
+    )
+
+    # Logic to select correct metric
+    if sent_mode == "Crowd Weight (Upvotes)":
+        # Must use s_summary as it contains the weighted calc
+        plot_df = s_summary
+        y_col = 'sentiment_weighted'
+        st.caption("Weighted by post score. Posts with high upvotes have more impact.")
     else:
-        st.info("No volume data available for this date range.")
-
-with tab2:
-    st.subheader(f"Sentiment Trends: {selected_ticker}")
+        # Prefer granular daily aggregation if available
+        plot_df = s_daily if not s_daily.empty else s_summary
+        y_col = 'score' if 'score' in plot_df.columns else 'sentiment_mean'
+        st.caption("Simple average of all posts. Every post counts equally.")
     
-    # 1. Daily Average Sentiment (From detailed posts)
-    if not filtered_sent_daily.empty:
-        st.markdown("### 📉 Daily Average Sentiment (Aggregated from Posts)")
-        fig_daily = px.line(
-            filtered_sent_daily, 
-            x='date', 
-            y='score', 
-            title="Daily Sentiment Score (-1 to +1)",
-            markers=True
-        )
-        fig_daily.add_hline(y=0, line_dash="dash", line_color="gray")
-        fig_daily.update_traces(line_color='#FF5733', line_width=3)
-        st.plotly_chart(fig_daily, use_container_width=True)
-    
-    # 2. Composition (From Summary Reports)
-    if not filtered_sent_summary.empty:
-        st.markdown("### 📊 Bullish vs Bearish Composition")
-        if 'pos_share' in filtered_sent_summary.columns:
-            fig_share = go.Figure()
-            fig_share.add_trace(go.Bar(x=filtered_sent_summary['date'], y=filtered_sent_summary['pos_share'], name='Bullish', marker_color='#2ca02c'))
-            fig_share.add_trace(go.Bar(x=filtered_sent_summary['date'], y=filtered_sent_summary['neg_share'], name='Bearish', marker_color='#d62728'))
-            fig_share.add_trace(go.Bar(x=filtered_sent_summary['date'], y=filtered_sent_summary['neu_share'], name='Neutral', marker_color='#7f7f7f'))
-            
-            fig_share.update_layout(barmode='stack', title="Daily Sentiment Composition")
-            st.plotly_chart(fig_share, use_container_width=True)
+    if not plot_df.empty:
+        # Safety check if column exists
+        if y_col not in plot_df.columns:
+            st.warning(f"Metric '{y_col}' not found. Please run your updated pipeline (reddit_sentiment_analyzer.py) to generate weighted scores.")
         else:
-            st.write("Sentiment breakdown columns missing.")
+            fig_sent = go.Figure()
             
-    if filtered_sent_daily.empty and filtered_sent_summary.empty:
-        st.warning(f"No sentiment data found for {selected_ticker}.")
+            # Dynamic Color Logic
+            colors = ['#00FF7F' if val >= 0 else '#FF4444' for val in plot_df[y_col]]
+            
+            fig_sent.add_trace(go.Bar(
+                x=plot_df['date'], 
+                y=plot_df[y_col],
+                name=f"{ticker} Sentiment",
+                marker_color=colors
+            ))
+            
+            fig_sent.add_hline(y=0, line_dash="solid", line_color="white", line_width=1)
+            
+            fig_sent.update_layout(
+                template="plotly_dark", 
+                height=350, 
+                margin=dict(l=10, r=10, t=30, b=10),
+                yaxis=dict(title="Score (-1 to +1)"),
+                hovermode="x unified"
+            )
+            st.plotly_chart(fig_sent, use_container_width=True)
+            
+    else:
+        st.info(f"No sentiment data available for {ticker} in this range.")
 
-# --- RAW DATA EXPANDER ---
-with st.expander("View Raw Data Tables"):
-    st.write("### Volume Data", filtered_vol)
-    if not filtered_sent_daily.empty:
-        st.write("### Daily Sentiment (Aggregated)", filtered_sent_daily)
-    if not filtered_sent_summary.empty:
-        st.write("### Sentiment Summary Reports", filtered_sent_summary)
+# ==============================================================================
+# MAIN NAVIGATION
+# ==============================================================================
+def main():
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Go to", ["Home", "Terminal"])
+    
+    if page == "Home":
+        render_home()
+    else:
+        render_terminal()
+
+if __name__ == "__main__":
+    main()

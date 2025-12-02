@@ -18,7 +18,7 @@ load_dotenv(dotenv_path=env_path)
 CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 USER_AGENT = os.getenv("REDDIT_USER_AGENT", "wsb-ticker-scraper/0.1 by Niels van Brussel")
-SUBREDDIT = "thetagang"
+SUBREDDIT = "QuantFinance"
 
 # Validate credentials
 if not CLIENT_ID or not CLIENT_SECRET:
@@ -68,7 +68,7 @@ def script_scrape_reddit():
     """Main Reddit scraping function."""
     print("Reddit Scraping Script Start")
     
-    symbol = "SOUN"  # Will be replaced by daily_pipeline_reddit.py
+    symbol = "NVDA"  # Will be replaced by daily_pipeline_reddit.py
     
     # Authenticate
     token = get_reddit_token()
@@ -199,8 +199,8 @@ def script_scrape_reddit():
 
     # 3. Clean and Sort
     if not combined_df.empty:
-        # Deduplicate
-        combined_df = combined_df.drop_duplicates(subset=['post_id'])
+        # Deduplicate, but updating UPVOTES/DOWNVOTES per post
+        combined_df = combined_df.drop_duplicates(subset=['post_id'], keep='last')
     
         # Force 'timestamp_raw' to numeric so sorting works
         combined_df['timestamp_raw'] = pd.to_numeric(combined_df['timestamp_raw'], errors='coerce')
