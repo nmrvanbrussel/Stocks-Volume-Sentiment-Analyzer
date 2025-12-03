@@ -423,7 +423,7 @@ def render_terminal():
         )
         st.plotly_chart(fig_vel, use_container_width=True)
 
-    # --- CHART 3: DAILY SENTIMENT (With Toggle) ---
+    # --- CHART 3: DAILY SENTIMENT (With Toggle & Safety Check) ---
     st.markdown("---")
     st.subheader(f"Daily Average Sentiment ({ticker})")
     
@@ -438,9 +438,15 @@ def render_terminal():
     # Logic to select correct metric
     if sent_mode == "Crowd Weight (Upvotes)":
         # Must use s_summary as it contains the weighted calc
-        plot_df = s_summary
-        y_col = 'sentiment_weighted'
-        st.caption("Weighted by post score. Posts with high upvotes have more impact.")
+        # SAFETY CHECK: Fallback if column is missing (e.g. Stocktwits)
+        if 'sentiment_weighted' in s_summary.columns:
+            plot_df = s_summary
+            y_col = 'sentiment_weighted'
+            st.caption("Weighted by post score. Posts with high upvotes have more impact.")
+        else:
+            st.warning("Weighted sentiment data not available for this source. Showing standard sentiment.")
+            plot_df = s_summary
+            y_col = 'sentiment_mean'
     else:
         # Prefer granular daily aggregation if available
         plot_df = s_daily if not s_daily.empty else s_summary
@@ -448,9 +454,9 @@ def render_terminal():
         st.caption("Simple average of all posts. Every post counts equally.")
     
     if not plot_df.empty:
-        # Safety check if column exists
+        # Final safety check if column exists
         if y_col not in plot_df.columns:
-            st.warning(f"Metric '{y_col}' not found. Please run your updated pipeline (reddit_sentiment_analyzer.py) to generate weighted scores.")
+            st.warning(f"Metric '{y_col}' not found. Please run your updated pipeline to generate scores.")
         else:
             fig_sent = go.Figure()
             
