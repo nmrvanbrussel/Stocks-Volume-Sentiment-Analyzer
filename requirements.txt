@@ -3,4 +3,4 @@ pandas
 plotly
 supabase
 python-dotenv
-yfinance as yf
+yfinance
