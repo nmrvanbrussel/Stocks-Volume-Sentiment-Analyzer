@@ -5,7 +5,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 from datetime import datetime
 
-CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\NVDA\2025\12\02\reddit_posts_NVDA_20251202.csv"  # change as needed
+CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\NVDA\2025\12\03\reddit_posts_NVDA_20251203.csv"  # change as needed
 
 # For Reddit, we'll combine title + text for better sentiment analysis
 # TEXT_COL will be created from combining 'title' and 'text' columns

@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 
 #Change CSV_PATH ofc
-CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\NVDA\2025\12\02\reddit_posts_NVDA_20251202.csv"
+CSV_PATH = r"C:\Users\nmrva\OneDrive\Desktop\Screening and Scraping\data\raw\reddit\NVDA\2025\12\03\reddit_posts_NVDA_20251203.csv"
 
 df = pd.read_csv(CSV_PATH)
 
