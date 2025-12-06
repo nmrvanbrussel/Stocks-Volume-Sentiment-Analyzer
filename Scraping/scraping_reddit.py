@@ -68,7 +68,7 @@ def script_scrape_reddit():
     """Main Reddit scraping function."""
     print("Reddit Scraping Script Start")
     
-    symbol = "NVDA"  # Will be replaced by daily_pipeline_reddit.py
+    symbol = "META"  # Will be replaced by daily_pipeline_reddit.py
     
     # Authenticate
     token = get_reddit_token()

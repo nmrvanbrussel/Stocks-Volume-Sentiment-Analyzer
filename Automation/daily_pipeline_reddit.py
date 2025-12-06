@@ -6,7 +6,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-SYMBOLS = ["NVDA"]
+SYMBOLS = ["NVDA", "AAPL", "GOOG", "META"]
 
 #"AAPL", "GOOG", "MSFT", "META", "AMZN", "TSLA", "AMD",
 
