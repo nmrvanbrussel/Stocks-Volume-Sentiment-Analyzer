@@ -1,28 +1,27 @@
 import requests
 import time
 import re
-import os
-import csv
 import yfinance as yf
 from datetime import datetime, timezone
-from dotenv import load_dotenv
 from pathlib import Path
-import pandas as pd
+import sys
 
-# Load environment variables from .env file in project root
+# Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-env_path = PROJECT_ROOT / ".env"
-load_dotenv(dotenv_path=env_path)
+sys.path.insert(0, str(PROJECT_ROOT))
 
-# Get credentials from environment
-CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
-USER_AGENT = os.getenv("REDDIT_USER_AGENT", "wsb-ticker-scraper/0.1 by Niels van Brussel")
-SUBREDDIT = "QuantFinance"
+from config import REDDIT_CONFIG, DATABASE_PATH
+from Database.db_utils import DatabaseManager
+
+# Get credentials from config
+CLIENT_ID = REDDIT_CONFIG['client_id']
+CLIENT_SECRET = REDDIT_CONFIG['client_secret']
+USER_AGENT = REDDIT_CONFIG['user_agent']
+SUBREDDIT = REDDIT_CONFIG['subreddit']
 
 # Validate credentials
 if not CLIENT_ID or not CLIENT_SECRET:
-    raise ValueError("Reddit credentials not found in .env file. Please create .env file with REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET")
+    raise ValueError("Reddit credentials not found in config. Please create .env file with REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET")
 
 def get_reddit_token():
     """Authenticate with Reddit API and return access token."""
@@ -64,25 +63,40 @@ def get_queries(symbol):
     
     return list(set(queries))
 
-def script_scrape_reddit():
-    """Main Reddit scraping function."""
-    print("Reddit Scraping Script Start")
+def script_scrape_reddit(symbol: str = None):
+    """Main Reddit scraping function with incremental support."""
+    if symbol is None:
+        symbol = "META"  # Will be replaced by daily_pipeline_reddit.py
     
-    symbol = "META"  # Will be replaced by daily_pipeline_reddit.py
+    print(f"{'='*60}")
+    print(f"Reddit Scraping Script Start - Symbol: {symbol}")
+    print(f"{'='*60}")
+    
+    # Initialize database manager
+    db_manager = DatabaseManager(DATABASE_PATH)
     
     # Authenticate
     token = get_reddit_token()
-    print(f"Successfully authenticated! Token: {token[:10]}...")
+    print(f"✓ Successfully authenticated! Token: {token[:10]}...")
     
     # Get search queries
     queries = get_queries(symbol)
     url = f"https://oauth.reddit.com/r/{SUBREDDIT}/search.json"
-    print(f"Generated Queries for {symbol}: {queries}")
+    print(f"Generated {len(queries)} queries for {symbol}: {queries}")
     
     # Scraping parameters
-    TARGET_POSTS = 2000
-    MAX_PAGES = 50
-    SLEEP_SEC = 2
+    TARGET_POSTS = REDDIT_CONFIG['target_posts']
+    MAX_PAGES = REDDIT_CONFIG['max_pages']
+    SLEEP_SEC = REDDIT_CONFIG['sleep_sec']
+    
+    # Get last post ID for incremental scraping
+    last_post_id = db_manager.get_last_post_id(symbol, source='reddit', subreddit=SUBREDDIT)
+    after = last_post_id
+    
+    if after:
+        print(f"✓ Incremental scraping - resuming from post: {after}")
+    else:
+        print(f"• First scrape for {symbol}")
     
     all_unique_posts = {}
     
@@ -94,10 +108,9 @@ def script_scrape_reddit():
     }
     
     for query in queries:
-        print(f"--- Started scraping for {SUBREDDIT} ---")
-        print(f"--- Started scraping for {query} ---")
+        print(f"\n--- Scraping query: {query} ---")
         
-        after = None
+        after_query = after  # Reset for each query
         pages_scraped = 0
         
         while pages_scraped < MAX_PAGES and len(all_unique_posts) < TARGET_POSTS:
@@ -106,7 +119,7 @@ def script_scrape_reddit():
                 "restrict_sr": "1",
                 "sort": "new",
                 "limit": "100",
-                "after": after,
+                "after": after_query,
                 "include_over_18": "on",
                 "t": "all"
             }
@@ -115,7 +128,7 @@ def script_scrape_reddit():
                 res = requests.get(url, headers=headers, params=params)
                 
                 if res.status_code == 429:
-                    print("Rate limited. Sleep for 5 seconds...")
+                    print("⚠ Rate limited. Sleep for 5 seconds...")
                     time.sleep(5)
                     continue
                 
@@ -124,7 +137,7 @@ def script_scrape_reddit():
                 
                 children = data.get("data", {}).get("children", [])
                 if not children:
-                    print("No more results found")
+                    print("  No more results found")
                     break
                 
                 new_posts = 0
@@ -134,26 +147,30 @@ def script_scrape_reddit():
                         all_unique_posts[post_id] = child['data']
                         new_posts += 1
                 
-                after = data.get("data", {}).get("after")
+                after_query = data.get("data", {}).get("after")
                 pages_scraped += 1
                 
-                print(f"Page {pages_scraped}: Found {len(children)} posts ({new_posts} new). Total Unique: {len(all_unique_posts)}")
+                print(f"  Page {pages_scraped}: Found {len(children)} posts ({new_posts} new). Total: {len(all_unique_posts)}")
                 
-                if not after:
-                    print("Reached the end of the stream.")
+                if not after_query:
+                    print("  Reached the end of the stream.")
                     break
                 
                 time.sleep(SLEEP_SEC)
                 
             except Exception as e:
-                print(f"Error on page {pages_scraped}: {e}")
+                print(f"✗ Error on page {pages_scraped}: {e}")
                 break
     
-    print(f"\n--- Finished. Collected {len(all_unique_posts)} UNIQUE posts. ---")
+    print(f"\n--- Finished scraping. Collected {len(all_unique_posts)} new posts ---")
     
-    # Prepare data for CSV
+    if not all_unique_posts:
+        print("✓ No new posts to save.")
+        return
+    
+    # Prepare posts for database insertion
     posts_data = []
-    for i, post in enumerate(all_unique_posts.values(), 1):
+    for post_id, post in all_unique_posts.items():
         created_utc = post.get('created_utc', 0)
         timestamp_iso = ''
         if created_utc:
@@ -163,59 +180,36 @@ def script_scrape_reddit():
                 timestamp_iso = ''
         
         posts_data.append({
-            'index': i,
+            'post_id': post.get('name', ''),
             'symbol': symbol,
             'title': post.get('title', ''),
             'text': post.get('selftext') or post.get('url', ''),
             'score': post.get('score', 0),
             'comments': post.get('num_comments', 0),
-            'timestamp_raw': str(created_utc) if created_utc else '',
+            'timestamp_raw': created_utc,
             'timestamp_iso': timestamp_iso,
-            'post_id': post.get('name', ''),
             'subreddit': SUBREDDIT
         })
     
-    # Path: data/raw/reddit/{SYMBOL}/{YEAR}/{MONTH}/{DAY}/
-    today = datetime.utcnow()
-    out_dir = os.path.join(PROJECT_ROOT, 'data', 'raw', 'reddit', symbol, 
-                          f"{today:%Y}", f"{today:%m}", f"{today:%d}")
-    os.makedirs(out_dir, exist_ok=True)
+    # Insert into database
+    inserted = db_manager.insert_reddit_posts_batch(posts_data)
+    print(f"✓ Inserted {inserted} posts into database")
     
-    filename = os.path.join(out_dir, f"reddit_posts_{symbol}_{today:%Y%m%d}.csv")
+    # Update metadata with last post ID
+    if all_unique_posts:
+        most_recent_id = list(all_unique_posts.keys())[0]
+        db_manager.update_scrape_metadata(
+            symbol=symbol,
+            last_post_id=most_recent_id,
+            posts_count=inserted,
+            source='reddit',
+            subreddit=SUBREDDIT
+        )
+        print(f"✓ Updated scrape metadata for {symbol}")
     
-    # 1. Convert new data to DataFrame
-    new_df = pd.DataFrame(posts_data)
-    
-    # 2. Load existing data if file exists
-    if os.path.exists(filename):
-        try:
-            existing_df = pd.read_csv(filename)
-            # Combine old and new
-            combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-        except pd.errors.EmptyDataError:
-            combined_df = new_df
-    else:
-        combined_df = new_df
-
-    # 3. Clean and Sort
-    if not combined_df.empty:
-        # Deduplicate, but updating UPVOTES/DOWNVOTES per post
-        combined_df = combined_df.drop_duplicates(subset=['post_id'], keep='last')
-    
-        # Force 'timestamp_raw' to numeric so sorting works
-        combined_df['timestamp_raw'] = pd.to_numeric(combined_df['timestamp_raw'], errors='coerce')
-        combined_df = combined_df.dropna(subset=['timestamp_raw'])
-    
-        # SORT: Now this will work because everything is a number
-        combined_df = combined_df.sort_values(by='timestamp_raw', ascending=False)
-        
-        combined_df.to_csv(filename, index=False)
-        
-        print(f"\nSaved {len(combined_df)} sorted posts to {filename}")
-    else:
-        print("\nNo data to save.")
-
-    print("Script Finished")
+    print(f"\n{'='*60}")
+    print("Script Finished Successfully")
+    print(f"{'='*60}\n")
 
 if __name__ == "__main__":
     script_scrape_reddit()
